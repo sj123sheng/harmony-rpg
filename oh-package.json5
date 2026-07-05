@@ -1,0 +1,13 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "harmony-rpg",
+  "version": "1.0.0",
+  "description": "Lightweight HarmonyOS native 2D RPG prototype",
+  "main": "",
+  "author": "xiling",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.6"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Harmony RPG entry module"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "Harmony RPG main ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Harmony RPG"
+    }
+  ]
+}

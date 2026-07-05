@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Harmony RPG entry module",
+  "main": "",
+  "author": "xiling",
+  "license": "MIT",
+  "dependencies": {}
+}

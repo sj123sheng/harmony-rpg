@@ -1,0 +1,10 @@
+.DS_Store
+**/.DS_Store
+.hvigor/
+build/
+entry/build/
+oh_modules/
+entry/oh_modules/
+*.hap
+*.hsp
+*.app
