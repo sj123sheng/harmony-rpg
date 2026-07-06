@@ -1,7 +1,13 @@
 import { GameLoop } from '../game/core/GameLoop';
 import { GameState } from '../game/core/GameState';
+import { Vector2 } from '../game/core/GameTypes';
+import { getInteractionActionText } from '../game/core/InteractionFeedback';
 import { InputController, JoystickLayout } from '../game/core/InputController';
 import { CanvasRenderer, Viewport } from '../game/render/CanvasRenderer';
+
+const JOYSTICK_TOUCH_SIZE: number = 240;
+const JOYSTICK_VISUAL_SIZE: number = 132;
+const JOYSTICK_KNOB_SIZE: number = 58;
 
 @Entry
 @Component
@@ -18,6 +24,7 @@ struct Index {
   @State private dialogueSpeaker: string = '';
   @State private dialogueText: string = '';
   @State private showInteractionButton: boolean = false;
+  @State private interactionButtonText: string = '交互';
 
   aboutToAppear(): void {
     this.loop.reset();
@@ -45,7 +52,7 @@ struct Index {
       this.Joystick()
 
       if (this.showInteractionButton || this.dialogueText.length > 0) {
-        Button(this.dialogueText.length > 0 ? '继续' : '交互')
+        Button(this.dialogueText.length > 0 ? '继续' : this.interactionButtonText)
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor('#3D321E')
@@ -102,32 +109,54 @@ struct Index {
   Joystick() {
     Stack() {
       Circle()
-        .width(132)
-        .height(132)
+        .width(JOYSTICK_VISUAL_SIZE)
+        .height(JOYSTICK_VISUAL_SIZE)
         .fill('rgba(47, 51, 38, 0.20)')
         .stroke('rgba(255, 255, 255, 0.45)')
         .strokeWidth(2)
       Circle()
-        .width(58)
-        .height(58)
+        .width(JOYSTICK_KNOB_SIZE)
+        .height(JOYSTICK_KNOB_SIZE)
         .fill('rgba(255, 249, 234, 0.90)')
         .stroke('rgba(64, 70, 50, 0.25)')
         .strokeWidth(2)
         .shadow({ radius: 10, color: 'rgba(32, 32, 24, 0.18)', offsetX: 0, offsetY: 3 })
         .translate({ x: this.joystickKnobOffsetX, y: this.joystickKnobOffsetY })
     }
-    .width(132)
-    .height(132)
-    .position({ x: 54, y: this.viewport.height - 178 })
+    .width(JOYSTICK_TOUCH_SIZE)
+    .height(JOYSTICK_TOUCH_SIZE)
+    .backgroundColor('rgba(0, 0, 0, 0.001)')
+    .position(this.getJoystickTouchOrigin())
+    .onTouch((event: TouchEvent) => {
+      this.handleJoystickTouch(event);
+    })
   }
 
   private handleCanvasTouch(event: TouchEvent): void {
     const layout = this.getJoystickLayout();
     event.touches.forEach((touch) => {
       if (event.type === TouchType.Down || event.type === TouchType.Move) {
-        if (touch.x <= 240 && touch.y >= this.viewport.height - 240) {
+        if (this.isInsideJoystickTouchArea(touch.x, touch.y)) {
           this.input.setJoystick(touch.id, { x: touch.x, y: touch.y }, layout);
         }
+      }
+      if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.input.releaseJoystick(touch.id);
+      }
+    });
+
+    const move = this.input.getMoveVector();
+    this.joystickKnobOffsetX = move.x * layout.radius;
+    this.joystickKnobOffsetY = move.y * layout.radius;
+    this.tick(16);
+  }
+
+  private handleJoystickTouch(event: TouchEvent): void {
+    const origin = this.getJoystickTouchOrigin();
+    const layout = this.getJoystickLayout();
+    event.touches.forEach((touch) => {
+      if (event.type === TouchType.Down || event.type === TouchType.Move) {
+        this.input.setJoystick(touch.id, { x: origin.x + touch.x, y: origin.y + touch.y }, layout);
       }
       if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
         this.input.releaseJoystick(touch.id);
@@ -146,6 +175,22 @@ struct Index {
       radius: 52,
       knobRadius: 29
     };
+  }
+
+  private getJoystickTouchOrigin(): Vector2 {
+    const layout = this.getJoystickLayout();
+    return {
+      x: layout.center.x - JOYSTICK_TOUCH_SIZE / 2,
+      y: layout.center.y - JOYSTICK_TOUCH_SIZE / 2
+    };
+  }
+
+  private isInsideJoystickTouchArea(x: number, y: number): boolean {
+    const origin = this.getJoystickTouchOrigin();
+    return x >= origin.x &&
+      x <= origin.x + JOYSTICK_TOUCH_SIZE &&
+      y >= origin.y &&
+      y <= origin.y + JOYSTICK_TOUCH_SIZE;
   }
 
   private startLoop(): void {
@@ -177,6 +222,7 @@ struct Index {
     this.dialogueSpeaker = dialogueLine?.speaker ?? '';
     this.dialogueText = dialogueLine?.text ?? '';
     this.showInteractionButton = snapshot.nearbyInteractableId !== undefined;
+    this.interactionButtonText = getInteractionActionText(snapshot.nearbyInteractable);
     this.renderer.render(this.context, snapshot, this.viewport);
   }
 }

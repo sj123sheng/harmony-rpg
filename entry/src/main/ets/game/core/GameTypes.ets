@@ -102,6 +102,7 @@ export interface GameStateSnapshot {
   quest: QuestData;
   activeDialogue?: ActiveDialogue;
   nearbyInteractableId?: string;
+  nearbyInteractable?: InteractionTarget;
 }
 
 export interface InteractionTarget {

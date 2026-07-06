@@ -5,6 +5,7 @@ import { resolveMovement } from '../world/CollisionSystem';
 import { findNearestInteractable } from '../world/InteractionSystem';
 import { advanceDialogue, getDialogue, startDialogue } from '../story/DialogueSystem';
 import { advanceQuestPhase, createQuestState } from '../story/QuestSystem';
+import { MovementController } from './MovementController';
 
 const INTERACTION_DISTANCE = 96;
 
@@ -12,6 +13,7 @@ export class GameState {
   private readonly map: MapData = VILLAGE_MAP;
   private player: PlayerData = createPlayer(VILLAGE_MAP.spawnPoint);
   private quest: QuestData = createQuestState(VILLAGE_MAP.quest);
+  private readonly movement: MovementController = new MovementController();
   private activeDialogue?: ActiveDialogue;
   private nearbyTarget?: InteractionTarget;
 
@@ -21,18 +23,15 @@ export class GameState {
       return;
     }
 
-    const length = Math.hypot(moveVector.x, moveVector.y);
-    if (length > 0) {
-      const normalized: Vector2 = {
-        x: moveVector.x / length,
-        y: moveVector.y / length
-      };
+    const velocity = this.movement.update(deltaSeconds, moveVector, this.player.speed);
+    const speed = Math.hypot(velocity.x, velocity.y);
+    if (speed > 0) {
       const desiredPosition: Vector2 = {
-        x: this.player.position.x + normalized.x * this.player.speed * deltaSeconds,
-        y: this.player.position.y + normalized.y * this.player.speed * deltaSeconds
+        x: this.player.position.x + velocity.x * deltaSeconds,
+        y: this.player.position.y + velocity.y * deltaSeconds
       };
       this.player.position = resolveMovement(getPlayerRect(this.player), desiredPosition, this.map.collisions, this.map.size);
-      this.player.direction = directionFromVector(normalized, this.player.direction);
+      this.player.direction = directionFromVector(velocity, this.player.direction);
     }
 
     this.refreshInteractionTarget();
@@ -72,12 +71,19 @@ export class GameState {
         size: { width: this.player.size.width, height: this.player.size.height },
         direction: this.player.direction,
         speed: this.player.speed
-      },
-      quest: { id: this.quest.id, title: this.quest.title, phase: this.quest.phase },
-      activeDialogue: this.activeDialogue ? { id: this.activeDialogue.id, lineIndex: this.activeDialogue.lineIndex } : undefined,
-      nearbyInteractableId: this.nearbyTarget?.id
-    };
-  }
+	      },
+	      quest: { id: this.quest.id, title: this.quest.title, phase: this.quest.phase },
+	      activeDialogue: this.activeDialogue ? { id: this.activeDialogue.id, lineIndex: this.activeDialogue.lineIndex } : undefined,
+	      nearbyInteractableId: this.nearbyTarget?.id,
+	      nearbyInteractable: this.nearbyTarget ? {
+	        id: this.nearbyTarget.id,
+	        kind: this.nearbyTarget.kind,
+	        name: this.nearbyTarget.name,
+	        dialogueId: this.nearbyTarget.dialogueId,
+	        distance: this.nearbyTarget.distance
+	      } : undefined
+	    };
+	  }
 
   private refreshInteractionTarget(): void {
     this.nearbyTarget = findNearestInteractable(

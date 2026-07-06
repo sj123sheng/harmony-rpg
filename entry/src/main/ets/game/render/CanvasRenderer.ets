@@ -1,4 +1,5 @@
-import { Direction, GameStateSnapshot, InteractableObjectData, NpcData, QuestPhase, Rect } from '../core/GameTypes';
+import { Direction, GameStateSnapshot, InteractionTarget, InteractableObjectData, NpcData, QuestPhase, Rect } from '../core/GameTypes';
+import { getInteractionPromptText } from '../core/InteractionFeedback';
 
 export interface Viewport {
   width: number;
@@ -11,7 +12,26 @@ interface WorldTransform {
   offsetY: number;
 }
 
-const COLORS = {
+interface RenderColors {
+  screen: string;
+  grass: string;
+  grassDeep: string;
+  grassLight: string;
+  road: string;
+  roadShade: string;
+  bamboo: string;
+  bambooDark: string;
+  bambooStem: string;
+  teaWall: string;
+  teaWallShade: string;
+  teaRoof: string;
+  teaRoofDark: string;
+  wellStone: string;
+  wellInner: string;
+  wood: string;
+}
+
+const COLORS: RenderColors = {
   screen: '#DCE8BF',
   grass: '#DDE9BC',
   grassDeep: '#BDD19A',
@@ -31,7 +51,14 @@ const COLORS = {
 };
 
 export class CanvasRenderer {
+  private lastQuestPhase?: QuestPhase;
+  private questFlashUntil: number = 0;
+
   render(context: CanvasRenderingContext2D, snapshot: GameStateSnapshot, viewport: Viewport): void {
+    const timestamp = Date.now();
+    const pulse = 0.5 + Math.sin(timestamp / 360) * 0.5;
+    const questFlashProgress = this.updateQuestFlash(snapshot.quest.phase, timestamp);
+
     context.clearRect(0, 0, viewport.width, viewport.height);
     this.drawScreenBackground(context, viewport);
 
@@ -42,8 +69,8 @@ export class CanvasRenderer {
 
     this.drawGroundLayer(context, snapshot);
     this.drawSceneLayer(context, snapshot);
-    this.drawQuestObjects(context, snapshot.map.objects, snapshot.nearbyInteractableId, snapshot.quest.phase);
-    this.drawNpcs(context, snapshot.map.npcs, snapshot.nearbyInteractableId);
+    this.drawQuestObjects(context, snapshot.map.objects, snapshot.nearbyInteractable, snapshot.quest.phase, pulse);
+    this.drawNpcs(context, snapshot.map.npcs, snapshot.nearbyInteractable);
     this.drawPlayer(
       context,
       snapshot.player.position.x,
@@ -54,7 +81,20 @@ export class CanvasRenderer {
     );
     context.restore();
 
-    this.drawQuestHint(context, snapshot.quest.title, snapshot.quest.phase, viewport);
+    this.drawQuestHint(context, snapshot.quest.title, snapshot.quest.phase, viewport, questFlashProgress);
+  }
+
+  private updateQuestFlash(phase: QuestPhase, timestamp: number): number {
+    if (this.lastQuestPhase !== undefined && this.lastQuestPhase !== phase) {
+      this.questFlashUntil = timestamp + 900;
+    }
+    this.lastQuestPhase = phase;
+
+    if (timestamp >= this.questFlashUntil) {
+      return 0;
+    }
+
+    return (this.questFlashUntil - timestamp) / 900;
   }
 
   private resolveWorldTransform(snapshot: GameStateSnapshot, viewport: Viewport): WorldTransform {
@@ -175,16 +215,17 @@ export class CanvasRenderer {
   private drawQuestObjects(
     context: CanvasRenderingContext2D,
     objects: InteractableObjectData[],
-    nearbyInteractableId: string | undefined,
-    phase: QuestPhase
+    nearbyInteractable: InteractionTarget | undefined,
+    phase: QuestPhase,
+    pulse: number
   ): void {
     const lampCompleted = phase === 'completed';
     objects.forEach((object) => {
-      const highlighted = nearbyInteractableId === object.id;
+      const highlighted = nearbyInteractable?.id === object.id;
       if (object.kind === 'spiritStone') {
-        this.drawSpiritStone(context, object, highlighted, phase);
+        this.drawSpiritStone(context, object, highlighted, phase, nearbyInteractable, pulse);
       } else {
-        this.drawSpiritLamp(context, object, highlighted, lampCompleted, phase);
+        this.drawSpiritLamp(context, object, highlighted, lampCompleted, phase, nearbyInteractable, pulse);
       }
     });
   }
@@ -193,7 +234,9 @@ export class CanvasRenderer {
     context: CanvasRenderingContext2D,
     object: InteractableObjectData,
     highlighted: boolean,
-    phase: QuestPhase
+    phase: QuestPhase,
+    nearbyInteractable: InteractionTarget | undefined,
+    pulse: number
   ): void {
     const centerX = object.position.x + object.size.width / 2;
     const centerY = object.position.y + object.size.height / 2;
@@ -203,9 +246,10 @@ export class CanvasRenderer {
     context.ellipse(centerX, object.position.y + object.size.height + 5, 33, 9, 0, 0, Math.PI * 2);
     context.fill();
     if (active) {
-      context.fillStyle = highlighted ? 'rgba(153, 220, 255, 0.48)' : 'rgba(120, 190, 230, 0.28)';
+      const glowRadius = highlighted ? 48 : 34 + pulse * 8;
+      context.fillStyle = highlighted ? 'rgba(153, 220, 255, 0.52)' : 'rgba(120, 190, 230, 0.34)';
       context.beginPath();
-      context.arc(centerX, centerY, highlighted ? 42 : 32, 0, Math.PI * 2);
+      context.arc(centerX, centerY, glowRadius, 0, Math.PI * 2);
       context.fill();
     }
     context.fillStyle = active ? '#87B5C8' : '#738A95';
@@ -218,6 +262,7 @@ export class CanvasRenderer {
     context.fill();
     if (highlighted) {
       this.drawInteractionHighlight(context, centerX, centerY, 42);
+      this.drawInteractionLabel(context, centerX, object.position.y - 22, getInteractionPromptText(nearbyInteractable));
     }
   }
 
@@ -226,15 +271,18 @@ export class CanvasRenderer {
     object: InteractableObjectData,
     highlighted: boolean,
     lampCompleted: boolean,
-    phase: QuestPhase
+    phase: QuestPhase,
+    nearbyInteractable: InteractionTarget | undefined,
+    pulse: number
   ): void {
     const centerX = object.position.x + object.size.width / 2;
     const flameY = object.position.y + 18;
     const ready = phase === 'foundSpiritStone';
-    if (lampCompleted) {
-      context.fillStyle = 'rgba(246, 200, 95, 0.30)';
+    if (lampCompleted || ready) {
+      const glowRadius = lampCompleted ? 64 : 46 + pulse * 16;
+      context.fillStyle = lampCompleted ? 'rgba(246, 200, 95, 0.34)' : 'rgba(245, 210, 138, 0.26)';
       context.beginPath();
-      context.arc(centerX, flameY + 8, 64, 0, Math.PI * 2);
+      context.arc(centerX, flameY + 8, glowRadius, 0, Math.PI * 2);
       context.fill();
     }
     context.fillStyle = '#5E4A3A';
@@ -251,17 +299,23 @@ export class CanvasRenderer {
     context.fill();
     if (highlighted) {
       this.drawInteractionHighlight(context, centerX, object.position.y + 38, 45);
+      this.drawInteractionLabel(context, centerX, object.position.y - 18, getInteractionPromptText(nearbyInteractable));
     }
   }
 
-  private drawNpcs(context: CanvasRenderingContext2D, npcs: NpcData[], nearbyInteractableId: string | undefined): void {
+  private drawNpcs(context: CanvasRenderingContext2D, npcs: NpcData[], nearbyInteractable: InteractionTarget | undefined): void {
     npcs.forEach((npc) => {
-      const highlighted = nearbyInteractableId === npc.id;
-      this.drawNpc(context, npc, highlighted);
+      const highlighted = nearbyInteractable?.id === npc.id;
+      this.drawNpc(context, npc, highlighted, nearbyInteractable);
     });
   }
 
-  private drawNpc(context: CanvasRenderingContext2D, npc: NpcData, highlighted: boolean): void {
+  private drawNpc(
+    context: CanvasRenderingContext2D,
+    npc: NpcData,
+    highlighted: boolean,
+    nearbyInteractable: InteractionTarget | undefined
+  ): void {
     const color = this.getNpcColor(npc.id);
     const x = npc.position.x;
     const y = npc.position.y;
@@ -273,6 +327,7 @@ export class CanvasRenderer {
     context.fill();
     if (highlighted) {
       this.drawInteractionHighlight(context, x + width / 2, y + height / 2, 38);
+      this.drawInteractionLabel(context, x + width / 2, y - 22, getInteractionPromptText(nearbyInteractable));
     }
     this.roundRect(context, { id: `${npc.id}-body`, x, y: y + 18, width, height: height - 12 }, color, 12);
     context.fillStyle = '#F2CDAA';
@@ -303,6 +358,25 @@ export class CanvasRenderer {
     context.beginPath();
     context.arc(centerX, centerY, radius + 6, 0, Math.PI * 2);
     context.stroke();
+  }
+
+  private drawInteractionLabel(context: CanvasRenderingContext2D, centerX: number, topY: number, text: string): void {
+    if (text.length === 0) {
+      return;
+    }
+
+    const width = text.length * 15 + 28;
+    const height = 30;
+    const x = centerX - width / 2;
+    const y = Math.max(8, topY);
+    context.fillStyle = 'rgba(43, 35, 25, 0.82)';
+    context.fillRect(x, y, width, height);
+    context.strokeStyle = 'rgba(255, 238, 178, 0.72)';
+    context.lineWidth = 1;
+    context.strokeRect(x, y, width, height);
+    context.fillStyle = '#FFF3C8';
+    context.font = '15px sans-serif';
+    context.fillText(text, x + 14, y + 20);
   }
 
   private drawPlayer(
@@ -336,12 +410,18 @@ export class CanvasRenderer {
     }
   }
 
-  private drawQuestHint(context: CanvasRenderingContext2D, title: string, phase: QuestPhase, viewport: Viewport): void {
+  private drawQuestHint(
+    context: CanvasRenderingContext2D,
+    title: string,
+    phase: QuestPhase,
+    viewport: Viewport,
+    flashProgress: number
+  ): void {
     const panelWidth = Math.min(310, Math.max(240, viewport.width - 56));
-    context.fillStyle = 'rgba(255, 252, 238, 0.82)';
+    context.fillStyle = flashProgress > 0 ? 'rgba(255, 242, 183, 0.94)' : 'rgba(255, 252, 238, 0.82)';
     context.fillRect(24, 20, panelWidth, 66);
-    context.strokeStyle = 'rgba(94, 78, 47, 0.20)';
-    context.lineWidth = 1;
+    context.strokeStyle = flashProgress > 0 ? 'rgba(213, 154, 52, 0.62)' : 'rgba(94, 78, 47, 0.20)';
+    context.lineWidth = flashProgress > 0 ? 2 : 1;
     context.strokeRect(24, 20, panelWidth, 66);
     context.fillStyle = '#2F3326';
     context.font = '18px sans-serif';
@@ -371,12 +451,18 @@ export class CanvasRenderer {
 }
 
 function getQuestPhaseLabel(phase: QuestPhase): string {
-  const labels: Record<string, string> = {
-    notStarted: '询问守灯人',
-    askedKeeper: '前往茶铺',
-    askedTeaMaster: '寻找井边灵石',
-    foundSpiritStone: '点亮村口灵灯',
-    completed: '灵灯已点亮'
-  };
-  return labels[phase] ?? '继续探索';
+  switch (phase) {
+    case 'notStarted':
+      return '询问守灯人';
+    case 'askedKeeper':
+      return '前往茶铺';
+    case 'askedTeaMaster':
+      return '寻找井边灵石';
+    case 'foundSpiritStone':
+      return '点亮村口灵灯';
+    case 'completed':
+      return '灵灯已点亮';
+    default:
+      return '继续探索';
+  }
 }
